@@ -40,8 +40,7 @@ main()
    //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
    int dim_size[NDIMS], periods[NDIMS], coords[NDIMS];
-   int north[NDIMS], east[NDIMS], south[NDIMS], west[NDIMS],
-       northeast[NDIMS], southeast[NDIMS], southwest[NDIMS], northwest[NDIMS];
+   int north[NDIMS], east[NDIMS], south[NDIMS], west[NDIMS];
 
    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    // VARIABLES FOR THE CARTESIAN TOPOLOGY
@@ -56,31 +55,20 @@ main()
    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
    int reorder, rank, processes, rows, columns, seed;
-   int north_rank, east_rank, south_rank, west_rank,
-       northeast_rank, southeast_rank, southwest_rank, northwest_rank;
+   int north_rank, east_rank, south_rank, west_rank;
    MPI_Comm cartesian2D;
 
    ///////////////////////////////////////////////////////////////////////////////////
    // VARIABLES FOR MPI
    // row_datatype    - custom datatype to send/receive the halo rows
    // column_datatype - custom datatype to send/receive the halo columns
-   // 
-   // receive_requests_even, send_requests_even, receive_requests_odd,
-   // send_requests_odd, recv, send - arrays holding all the requests for
-   // receiving and sending messages. The first 4 arrays will be used to
-   // establish persistent communication. The last 2 will be used inside
-   // the main loop.
-   // 
    // status          - array holding the output of MPI operations
    // t1, t2          - used for MPI_Wtime
    // root            - used to check if the number of processes is a perfect square
    //////////////////////////////////////////////////////////////////////////////////
 
    MPI_Datatype row_datatype, column_datatype;
-   MPI_Request  receive_requests_even[8], send_requests_even[8], receive_requests_odd[8], send_requests_odd[8];
-   MPI_Request* send; 
-   MPI_Request* recv; 
-   MPI_Status   statuses[8];
+   MPI_Status   statuses[4];
    double       t1, t2, root;
 
    // Our Cartesian topology will be a torus, so both fields of "periods" array will have a value of 1
@@ -145,32 +133,16 @@ main()
    west[1] = coords[1] - 1;
    MPI_Cart_rank(cartesian2D, west, &west_rank);
 
-   northeast[0] = coords[0] - 1;
-   northeast[1] = coords[1] + 1;
-   MPI_Cart_rank(cartesian2D, northeast, &northeast_rank);
-
-   southeast[0] = coords[0] + 1;
-   southeast[1] = coords[1] + 1;
-   MPI_Cart_rank(cartesian2D, southeast, &southeast_rank);
-
-   southwest[0] = coords[0] + 1;
-   southwest[1] = coords[1] - 1;
-   MPI_Cart_rank(cartesian2D, southwest, &southwest_rank);
-
-   northwest[0] = coords[0] - 1;
-   northwest[1] = coords[1] - 1;
-   MPI_Cart_rank(cartesian2D, northwest, &northwest_rank);
-
    // We need two datatypes for the halos, one for the rows and one for the columns
-   MPI_Type_contiguous(columns - 2, MPI_CHAR, &row_datatype);
+   MPI_Type_contiguous(columns, MPI_CHAR, &row_datatype);
    MPI_Type_commit(&row_datatype);
 
    MPI_Type_vector(rows - 2, 1, columns, MPI_CHAR, &column_datatype);
    MPI_Type_commit(&column_datatype);
 
    // Initialize the arrays that will be used inside the main loop
-   recv = (MPI_Request*)malloc(8 * sizeof(MPI_Request));
-   send = (MPI_Request*)malloc(8 * sizeof(MPI_Request));
+   recv = (MPI_Request*)malloc(4 * sizeof(MPI_Request));
+   send = (MPI_Request*)malloc(4 * sizeof(MPI_Request));
 
    // Pointers to our 2D grid, and its necessary copy
    char* h_life = (char*)malloc(rows * columns * sizeof(char));
@@ -191,53 +163,6 @@ main()
       MPI_Finalize();
       return -1;
    }
-
-   /*******************************************************************************************************************************************/
-   /* We implement persistent communication, since the neighboring processes will always remain the same through the execution of the program */
-   /* These are for the even iterations of the loop, e.g. generation = 0, 2, 4, 6, 8 etc.                                                     */
-   /*******************************************************************************************************************************************/
-   MPI_Recv_init(d_life + 1, 1, row_datatype, north_rank, north_rank, cartesian2D, &receive_requests_even[0]);
-   MPI_Recv_init(d_life + (rows - 1) * columns + 1, 1, row_datatype, south_rank, south_rank, cartesian2D, &receive_requests_even[1]);
-   MPI_Recv_init(d_life + columns, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_even[2]);
-   MPI_Recv_init(d_life + (columns * 2) - 1, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_even[3]);
-
-   MPI_Recv_init(d_life, 1, MPI_CHAR, northwest_rank, northwest_rank, cartesian2D, &receive_requests_even[4]);
-   MPI_Recv_init(d_life + columns - 1, 1, MPI_CHAR, northeast_rank, northeast_rank, cartesian2D, &receive_requests_even[5]);
-   MPI_Recv_init(d_life + columns * (rows - 1), 1, MPI_CHAR, southwest_rank, southwest_rank, cartesian2D, &receive_requests_even[6]);
-   MPI_Recv_init(d_life + (columns * rows) - 1, 1, MPI_CHAR, southeast_rank, southeast_rank, cartesian2D, &receive_requests_even[7]);
-
-   MPI_Send_init(d_life + (rows - 2) * columns + 1, 1, row_datatype, south_rank, rank, cartesian2D, &send_requests_even[0]);
-   MPI_Send_init(d_life + columns + 1, 1, row_datatype, north_rank, rank, cartesian2D, &send_requests_even[1]);
-   MPI_Send_init(d_life + (columns * 2) - 2, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_even[2]);
-   MPI_Send_init(d_life + columns + 1, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_even[3]);
-
-   MPI_Send_init(d_life + columns * (rows - 1) - 2, 1, MPI_CHAR, southeast_rank, rank, cartesian2D, &send_requests_even[4]);
-   MPI_Send_init(d_life + columns * (rows - 2) + 1, 1, MPI_CHAR, southwest_rank, rank, cartesian2D, &send_requests_even[5]);
-   MPI_Send_init(d_life + (columns * 2) - 2, 1, MPI_CHAR, northeast_rank, rank, cartesian2D, &send_requests_even[6]);
-   MPI_Send_init(d_life + columns + 1, 1, MPI_CHAR, northwest_rank, rank, cartesian2D, &send_requests_even[7]);
-
-   /**************************************************************************************/
-   /* These are for the odd iterations of the loop, e.g. generation = 1, 3, 5, 7, 9 etc. */
-   /**************************************************************************************/
-   MPI_Recv_init(d_life_copy + 1, 1, row_datatype, north_rank, north_rank, cartesian2D, &receive_requests_odd[0]);
-   MPI_Recv_init(d_life_copy + (rows - 1) * columns + 1, 1, row_datatype, south_rank, south_rank, cartesian2D, &receive_requests_odd[1]);
-   MPI_Recv_init(d_life_copy + columns, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_odd[2]);
-   MPI_Recv_init(d_life_copy + (columns * 2) - 1, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_odd[3]);
-
-   MPI_Recv_init(d_life_copy, 1, MPI_CHAR, northwest_rank, northwest_rank, cartesian2D, &receive_requests_odd[4]);
-   MPI_Recv_init(d_life_copy + columns - 1, 1, MPI_CHAR, northeast_rank, northeast_rank, cartesian2D, &receive_requests_odd[5]);
-   MPI_Recv_init(d_life_copy + columns * (rows - 1), 1, MPI_CHAR, southwest_rank, southwest_rank, cartesian2D, &receive_requests_odd[6]);
-   MPI_Recv_init(d_life_copy + (columns * rows) - 1, 1, MPI_CHAR, southeast_rank, southeast_rank, cartesian2D, &receive_requests_odd[7]);
-
-   MPI_Send_init(d_life_copy + (rows - 2) * columns + 1, 1, row_datatype, south_rank, rank, cartesian2D, &send_requests_odd[0]);
-   MPI_Send_init(d_life_copy + columns + 1, 1, row_datatype, north_rank, rank, cartesian2D, &send_requests_odd[1]);
-   MPI_Send_init(d_life_copy + (columns * 2) - 2, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_odd[2]);
-   MPI_Send_init(d_life_copy + columns + 1, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_odd[3]);
-
-   MPI_Send_init(d_life_copy + columns * (rows - 1) - 2, 1, MPI_CHAR, southeast_rank, rank, cartesian2D, &send_requests_odd[4]);
-   MPI_Send_init(d_life_copy + columns * (rows - 2) + 1, 1, MPI_CHAR, southwest_rank, rank, cartesian2D, &send_requests_odd[5]);
-   MPI_Send_init(d_life_copy + (columns * 2) - 2, 1, MPI_CHAR, northeast_rank, rank, cartesian2D, &send_requests_odd[6]);
-   MPI_Send_init(d_life_copy + columns + 1, 1, MPI_CHAR, northwest_rank, rank, cartesian2D, &send_requests_odd[7]);
 
    // Synchronize all the processes before we start
    MPI_Barrier(cartesian2D);
@@ -292,37 +217,33 @@ main()
 #endif
 #endif
    for (int generation = 0; generation < GENERATIONS; generation++) {
-      if (generation % 2 == 0) {
-         recv = &receive_requests_even[0];
-         send = &send_requests_even[0];
-      } else {
-         recv = &receive_requests_odd[0];
-         send = &send_requests_odd[0];
-      }
+      // send left column, receive right column
+      MPI_Sendrecv(d_life + columns + 1,       1, column_datatype, west_rank, west_rank,
+                   d_life + (columns * 2) - 1, 1, column_datatype, east_rank, east_rank,
+                   cartesian2D,
+                   &status[0]);
 
-      //MPI_Start(&recv[0]);
-      //MPI_Start(&recv[1]);
-      //MPI_Start(&recv[2]);
-      //MPI_Start(&recv[3]);
-      //MPI_Start(&recv[4]);
-      //MPI_Start(&recv[5]);
-      //MPI_Start(&recv[6]);
-      //MPI_Start(&recv[7]);
+      // send right column, receive left column
+      MPI_Sendrecv(d_life + (columns * 2) - 2, 1, column_datatype, east_rank, east_rank,
+                   d_life + columns - 1,       1, column_datatype, west_rank, west_rank,
+                   cartesian2D,
+                   &status[1]);
 
-      //MPI_Start(&send[0]);
-      //MPI_Start(&send[1]);
-      //MPI_Start(&send[2]);
-      //MPI_Start(&send[3]);
-      MPI_Start(&send[4]);
-      MPI_Start(&send[5]);
-      MPI_Start(&send[6]);
-      MPI_Start(&send[7]);
-      
+      // send top row, receive bottom row (including corner elements)
+      MPI_Sendrecv(d_life + columns,              1, row_datatype, north_rank, north_rank,
+                   d_life + (rows - 1) * columns, 1, row_datatype, south_rank, south_rank,
+                   cartesian2D,
+                   &status[2]);
+
+      // send bottom row, receive top row (including corner elements)
+      MPI_Sendrecv(d_life + (rows - 2) * columns, 1, row_datatype, south_rank, south_rank,
+                   d_life,                        1, row_datatype, north_rank, north_rank,
+                   cartesian2D,
+                   &status[3]);
+
       nextGenerationInner(d_life, d_life_copy, rows, columns);
-
-      //MPI_Waitall(4, recv, statuses);
-
       nextGenerationOuter(d_life, d_life_copy, rows, columns);
+
 #ifdef DEBUG_GRID
       // Print the grid of every process
       if (rank == 0) {
@@ -352,8 +273,6 @@ main()
       // a loop to copy the contents.
       /////////////////////////////////////////////////////////////////////////////////////////////////
       swap(&d_life, &d_life_copy);
-
-      MPI_Waitall(4, send, statuses);
    }
 
    MPI_Pcontrol(0);
