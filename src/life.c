@@ -320,7 +320,7 @@ main()
       
       nextGenerationInner(d_life, d_life_copy, rows, columns);
 
-      //MPI_Waitall(4, recv, statuses);
+      MPI_Waitall(8, recv, statuses);
 
       nextGenerationOuter(d_life, d_life_copy, rows, columns);
 #ifdef DEBUG_GRID
@@ -353,7 +353,7 @@ main()
       /////////////////////////////////////////////////////////////////////////////////////////////////
       swap(&d_life, &d_life_copy);
 
-      MPI_Waitall(4, send, statuses);
+      MPI_Waitall(8, send, statuses);
    }
 
    MPI_Pcontrol(0);
