@@ -300,19 +300,19 @@ main()
          send = &send_requests_odd[0];
       }
 
-      //MPI_Start(&recv[0]);
-      //MPI_Start(&recv[1]);
-      //MPI_Start(&recv[2]);
-      //MPI_Start(&recv[3]);
-      //MPI_Start(&recv[4]);
-      //MPI_Start(&recv[5]);
-      //MPI_Start(&recv[6]);
-      //MPI_Start(&recv[7]);
+      MPI_Start(&recv[0]);
+      MPI_Start(&recv[1]);
+      MPI_Start(&recv[2]);
+      MPI_Start(&recv[3]);
+      MPI_Start(&recv[4]);
+      MPI_Start(&recv[5]);
+      MPI_Start(&recv[6]);
+      MPI_Start(&recv[7]);
 
-      //MPI_Start(&send[0]);
-      //MPI_Start(&send[1]);
-      //MPI_Start(&send[2]);
-      //MPI_Start(&send[3]);
+      MPI_Start(&send[0]);
+      MPI_Start(&send[1]);
+      MPI_Start(&send[2]);
+      MPI_Start(&send[3]);
       MPI_Start(&send[4]);
       MPI_Start(&send[5]);
       MPI_Start(&send[6]);
