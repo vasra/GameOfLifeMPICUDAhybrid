@@ -9,9 +9,9 @@
 #include <device_launch_parameters.h>
 
 // The size of one side of the square grid
-#define SIZE 840
+#define SIZE 26880
 #define NDIMS 2
-#define GENERATIONS 1
+#define GENERATIONS 1000
 #define BLOCKS
 //#define DEBUG_COORDINATES
 //#define DEBUG_GRID
@@ -22,7 +22,9 @@ void swap(char** a, char** b);
 void nextGeneration(char* d_life, char* d_life_copy, int rows, int columns);
 void nextGenerationInner(char* d_life, char* d_life_copy, int rows, int columns);
 void nextGenerationOuter(char* d_life, char* d_life_copy, int rows, int columns);
-cudaError_t initializeOnDevice(char** d_life, char** d_life_copy, char** h_life, int rows, int columns);
+cudaError_t initializeOnDevice(char** d_life, char** d_life_copy, char** leftHaloColumnBufferSend, char** leftHaloColumnBufferRecv, char** rightHaloColumnBufferSend, char** rightHaloColumnBufferRecv, char** h_life, int rows, int columns);
+void packHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
+void unpackHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
 void getGPUCount(int* numOfGPUs);
 
 int
@@ -165,7 +167,7 @@ main()
    MPI_Type_contiguous(columns - 2, MPI_CHAR, &row_datatype);
    MPI_Type_commit(&row_datatype);
 
-   MPI_Type_vector(rows - 2, 1, columns, MPI_CHAR, &column_datatype);
+   MPI_Type_contiguous(rows - 2, MPI_CHAR, &column_datatype);
    MPI_Type_commit(&column_datatype);
 
    // Initialize the arrays that will be used inside the main loop
@@ -176,6 +178,10 @@ main()
    char* h_life = (char*)malloc(rows * columns * sizeof(char));
    char* d_life;
    char* d_life_copy;
+   char* leftHaloColumnBufferSend;
+   char* leftHaloColumnBufferRecv;
+   char* rightHaloColumnBufferSend;
+   char* rightHaloColumnBufferRecv;
 
    // Generate the first generation according to the random seed
    seed = rank + 2;
@@ -185,7 +191,7 @@ main()
    // Game of Life boards on the GPU too
    cudaSetDevice(rank % numGPUs);
 
-   if (initializeOnDevice(&d_life, &d_life_copy, &h_life, rows, columns) != cudaSuccess) {
+   if (initializeOnDevice(&d_life, &d_life_copy, &leftHaloColumnBufferSend, &leftHaloColumnBufferRecv, &rightHaloColumnBufferSend, &rightHaloColumnBufferRecv, &h_life, rows, columns) != cudaSuccess) {
       fprintf(stderr, "Could not initialize on the device. Exiting.\n");
       MPI_Abort(MPI_COMM_WORLD, -1);
       MPI_Finalize();
@@ -198,8 +204,8 @@ main()
    /*******************************************************************************************************************************************/
    MPI_Recv_init(d_life + 1, 1, row_datatype, north_rank, north_rank, cartesian2D, &receive_requests_even[0]);
    MPI_Recv_init(d_life + (rows - 1) * columns + 1, 1, row_datatype, south_rank, south_rank, cartesian2D, &receive_requests_even[1]);
-   MPI_Recv_init(d_life + columns, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_even[2]);
-   MPI_Recv_init(d_life + (columns * 2) - 1, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_even[3]);
+   MPI_Recv_init(leftHaloColumnBufferRecv, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_even[2]);
+   MPI_Recv_init(rightHaloColumnBufferRecv, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_even[3]);
 
    MPI_Recv_init(d_life, 1, MPI_CHAR, northwest_rank, northwest_rank, cartesian2D, &receive_requests_even[4]);
    MPI_Recv_init(d_life + columns - 1, 1, MPI_CHAR, northeast_rank, northeast_rank, cartesian2D, &receive_requests_even[5]);
@@ -208,8 +214,8 @@ main()
 
    MPI_Send_init(d_life + (rows - 2) * columns + 1, 1, row_datatype, south_rank, rank, cartesian2D, &send_requests_even[0]);
    MPI_Send_init(d_life + columns + 1, 1, row_datatype, north_rank, rank, cartesian2D, &send_requests_even[1]);
-   MPI_Send_init(d_life + (columns * 2) - 2, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_even[2]);
-   MPI_Send_init(d_life + columns + 1, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_even[3]);
+   MPI_Send_init(rightHaloColumnBufferSend, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_even[2]);
+   MPI_Send_init(leftHaloColumnBufferSend, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_even[3]);
 
    MPI_Send_init(d_life + columns * (rows - 1) - 2, 1, MPI_CHAR, southeast_rank, rank, cartesian2D, &send_requests_even[4]);
    MPI_Send_init(d_life + columns * (rows - 2) + 1, 1, MPI_CHAR, southwest_rank, rank, cartesian2D, &send_requests_even[5]);
@@ -221,8 +227,8 @@ main()
    /**************************************************************************************/
    MPI_Recv_init(d_life_copy + 1, 1, row_datatype, north_rank, north_rank, cartesian2D, &receive_requests_odd[0]);
    MPI_Recv_init(d_life_copy + (rows - 1) * columns + 1, 1, row_datatype, south_rank, south_rank, cartesian2D, &receive_requests_odd[1]);
-   MPI_Recv_init(d_life_copy + columns, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_odd[2]);
-   MPI_Recv_init(d_life_copy + (columns * 2) - 1, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_odd[3]);
+   MPI_Recv_init(leftHaloColumnBufferRecv, 1, column_datatype, west_rank, west_rank, cartesian2D, &receive_requests_odd[2]);
+   MPI_Recv_init(rightHaloColumnBufferRecv, 1, column_datatype, east_rank, east_rank, cartesian2D, &receive_requests_odd[3]);
 
    MPI_Recv_init(d_life_copy, 1, MPI_CHAR, northwest_rank, northwest_rank, cartesian2D, &receive_requests_odd[4]);
    MPI_Recv_init(d_life_copy + columns - 1, 1, MPI_CHAR, northeast_rank, northeast_rank, cartesian2D, &receive_requests_odd[5]);
@@ -231,8 +237,8 @@ main()
 
    MPI_Send_init(d_life_copy + (rows - 2) * columns + 1, 1, row_datatype, south_rank, rank, cartesian2D, &send_requests_odd[0]);
    MPI_Send_init(d_life_copy + columns + 1, 1, row_datatype, north_rank, rank, cartesian2D, &send_requests_odd[1]);
-   MPI_Send_init(d_life_copy + (columns * 2) - 2, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_odd[2]);
-   MPI_Send_init(d_life_copy + columns + 1, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_odd[3]);
+   MPI_Send_init(rightHaloColumnBufferSend, 1, column_datatype, east_rank, rank, cartesian2D, &send_requests_odd[2]);
+   MPI_Send_init(leftHaloColumnBufferSend, 1, column_datatype, west_rank, rank, cartesian2D, &send_requests_odd[3]);
 
    MPI_Send_init(d_life_copy + columns * (rows - 1) - 2, 1, MPI_CHAR, southeast_rank, rank, cartesian2D, &send_requests_odd[4]);
    MPI_Send_init(d_life_copy + columns * (rows - 2) + 1, 1, MPI_CHAR, southwest_rank, rank, cartesian2D, &send_requests_odd[5]);
@@ -309,6 +315,8 @@ main()
       MPI_Start(&recv[6]);
       MPI_Start(&recv[7]);
 
+      packHaloColumns(d_life, leftHaloColumnBufferSend, rightHaloColumnBufferSend, rows, columns);
+
       MPI_Start(&send[0]);
       MPI_Start(&send[1]);
       MPI_Start(&send[2]);
@@ -321,6 +329,8 @@ main()
       nextGenerationInner(d_life, d_life_copy, rows, columns);
 
       MPI_Waitall(8, recv, statuses);
+
+      unpackHaloColumns(d_life, leftHaloColumnBufferRecv, rightHaloColumnBufferRecv, rows, columns);
 
       nextGenerationOuter(d_life, d_life_copy, rows, columns);
 #ifdef DEBUG_GRID
@@ -365,8 +375,14 @@ main()
 
    // Clean up and exit
    free(h_life);
+
    cudaFree(d_life);
    cudaFree(d_life_copy);
+   cudaFree(leftHaloColumnBufferSend);
+   cudaFree(leftHaloColumnBufferRecv);
+   cudaFree(rightHaloColumnBufferSend);
+   cudaFree(rightHaloColumnBufferRecv);
+
    MPI_Type_free(&row_datatype);
    MPI_Type_free(&column_datatype);
    MPI_Finalize();

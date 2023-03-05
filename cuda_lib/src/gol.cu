@@ -146,6 +146,37 @@ nextGenOuter(char* d_life, char* d_life_copy, const int rows, const int columns)
    }
 }
 
+__global__ void
+packCols(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns) {
+   int X = blockIdx.x * blockDim.x + threadIdx.x;
+   int Y = blockIdx.y * blockDim.y + threadIdx.y;
+
+   bool isOnLeftRealmostColumn = ((X == 1) && (Y > 0) && (Y < (rows - 1)));
+   bool isOnRightRealColumn = ((X == (columns - 2)) && (Y > 0) && (Y < (rows - 1)));
+
+   if (isOnLeftRealmostColumn) {  
+      *(leftHaloColumn + Y - 1) = *(d_life + (Y * columns) + 1);
+   } else if (isOnRightRealColumn) {
+      *(rightHaloColumn + Y - 1) = *(d_life + (Y * columns) + columns - 2);
+   }
+}
+
+
+__global__ void
+unpackCols(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns) {
+   int X = blockIdx.x * blockDim.x + threadIdx.x;
+   int Y = blockIdx.y * blockDim.y + threadIdx.y;
+
+   bool isOnLeftRealmostColumn = ((X == 1) && (Y > 0) && (Y < (rows - 1)));
+   bool isOnRightRealColumn = ((X == (columns - 2)) && (Y > 0) && (Y < (rows - 1)));
+
+   if (isOnLeftRealmostColumn) {  
+       *(d_life + (Y * columns)) = *(leftHaloColumn + Y - 1);
+   } else if (isOnRightRealColumn) {
+       *(d_life + (Y * columns) + columns - 1) = *(rightHaloColumn + Y - 1);
+   }
+}
+
 extern "C" void
 nextGenerationInner(char* d_life, char* d_life_copy, int rows, int columns) {
    // The layout of the threads in the block
@@ -176,7 +207,7 @@ nextGenerationOuter(char* d_life, char* d_life_copy, int rows, int columns) {
 }
 
 extern "C" cudaError_t
-initializeOnDevice (char** d_life, char** d_life_copy, char** h_life, int rows, int columns) {
+initializeOnDevice(char** d_life, char** d_life_copy, char** leftHaloColumnBufferSend, char** leftHaloColumnBufferRecv, char** rightHaloColumnBufferSend, char** rightHaloColumnBufferRecv, char** h_life, int rows, int columns) {
    cudaError_t err = cudaSuccess;
 
    err = cudaMalloc((void**)&(*d_life), rows * columns * sizeof(char));
@@ -203,5 +234,52 @@ initializeOnDevice (char** d_life, char** d_life_copy, char** h_life, int rows, 
       return err;
    }
 
+   err = cudaMalloc((void**)&(*leftHaloColumnBufferSend), (rows  - 2) * sizeof(char));
+   if (cudaSuccess != err) {
+      fprintf(stderr, "Could not allocate CUDA memory, with error code %d\n", err);
+      return err;
+   }
+
+   err = cudaMalloc((void**)&(*rightHaloColumnBufferSend), (rows - 2) * sizeof(char));
+   if (cudaSuccess != err) {
+      fprintf(stderr, "Could not allocate CUDA memory, with error code %d\n", err);
+      return err;
+   }
+
+   err = cudaMalloc((void**)&(*leftHaloColumnBufferRecv), (rows  - 2) * sizeof(char));
+   if (cudaSuccess != err) {
+      fprintf(stderr, "Could not allocate CUDA memory, with error code %d\n", err);
+      return err;
+   }
+
+   err = cudaMalloc((void**)&(*rightHaloColumnBufferRecv), (rows - 2) * sizeof(char));
+   if (cudaSuccess != err) {
+      fprintf(stderr, "Could not allocate CUDA memory, with error code %d\n", err);
+      return err;
+   }
+
    return err;
 } 
+
+extern "C" void
+packHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns) {
+   unsigned int gridX = static_cast<int>(ceil(columns / static_cast<float>(BLOCK_X)));
+   unsigned int gridY = static_cast<int>(ceil(rows / static_cast<float>(BLOCK_Y)));
+
+   dim3 blockDims{ BLOCK_X, BLOCK_Y, 1 };
+   dim3 gridDims{ gridX, gridY, 1 };
+
+   packCols<<<gridDims, blockDims>>>(d_life, leftHaloColumn, rightHaloColumn, rows, columns);
+}
+
+
+extern "C" void
+unpackHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns) {
+   unsigned int gridX = static_cast<int>(ceil(columns  / static_cast<float>(BLOCK_X - 2)));
+   unsigned int gridY = static_cast<int>(ceil(rows / static_cast<float>(BLOCK_Y - 2)));
+
+   dim3 blockDims{ BLOCK_X, BLOCK_Y, 1 };
+   dim3 gridDims{ gridX, gridY, 1 };
+
+   unpackCols<<<gridDims, blockDims>>>(d_life, leftHaloColumn, rightHaloColumn, rows, columns);
+}

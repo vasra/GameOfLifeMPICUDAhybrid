@@ -22,6 +22,12 @@ nextGenInner(char* d_life, char* d_life_copy, const int rows, const int columns)
 __global__ void
 nextGenOuter(char* d_life, char* d_life_copy, const int rows, const int columns); 
 
+__global__ void
+packCols(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
+
+__global__ void
+unpackCols(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
+
 extern "C" void
 nextGeneration(char* d_life, char* d_life_copy, int rows, int columns);
 
@@ -32,8 +38,14 @@ extern "C" void
 nextGenerationOuter(char* d_life, char* d_life_copy, int rows, int columns);
 
 extern "C" cudaError_t
-initializeOnDevice(char** d_life, char** d_life_copy, char** h_life, const int rows, const int columns);
+initializeOnDevice(char** d_life, char** d_life_copy, char** leftHaloColumnBufferSend, char** leftHaloColumnBufferRecv, char** rightHaloColumnBufferSend, char** rightHaloColumnBufferRecv, char** h_life, int rows, int columns);
 
 extern "C" void
 getGPUCount(int* numOfGPUs);
+
+extern "C" void
+packHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
+
+extern "C" void
+unpackHaloColumns(char* d_life, char* leftHaloColumn, char* rightHaloColumn, int rows, int columns); 
 #endif

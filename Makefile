@@ -291,7 +291,8 @@ CUDA_SRC = cuda_lib/src
 # MPI flags
 MPICC = mpicc
 MPIINC = -I${CUDA_PATH}/include -Icuda_lib/include
-MPIFLAGS = -O3 -g $(MPIINC) -L${MPIPROOT}/lib $(OUTPUT_DIR)/$(CUDA_LIBRARY) -L${CUDA_PATH}/lib${LIBSUFFIX} -lm -lstdc++ -lcudart -lmpiP -lbfd -lunwind -std=c99
+# MPIFLAGS = -O3 -g $(MPIINC) -L${MPIPROOT}/lib $(OUTPUT_DIR)/$(CUDA_LIBRARY) -L${CUDA_PATH}/lib${LIBSUFFIX} -lm -lstdc++ -lcudart -lmpiP -lbfd -lunwind -std=c99
+MPIFLAGS = -O3 -g $(MPIINC) -L${CUDA_PATH}/lib64 -lcudart -lstdc++ -L$(OUTPUT_DIR) -L$(OUTPUT_DIR)/gol.a -L${MPIPROOT}/lib -lmpiP -lbfd -lunwind -std=c99 -lm
 
 all: gol.o gol.a life.o life.x
 
@@ -303,15 +304,17 @@ gol.o: $(CUDA_SRC)/gol.cu
 	mv $@ $(OUTPUT_DIR)/$@
 
 $(CUDA_LIBRARY): $(OUTPUT_DIR)/gol.o
-	$(NVCC) $(NVCCFLAGS) -lib -o $@ $<
-	mv $@ $(OUTPUT_DIR)/$@
+	#$(NVCC) $(NVCCFLAGS) -lib -o $@ $<
+	#$(NVCC) $(NVCCFLAGS) $(OUTPUT_DIR)/gol.o -o $(OUTPUT_DIR)/$(CUDA_LIBRARY)
+	ar rcs $(OUTPUT_DIR)/$(CUDA_LIBRARY) $(OUTPUT_DIR)/gol.o
+	#mv $@ $(OUTPUT_DIR)/$@
 
-life.o: ./src/life.c 
+life.o: ./src/life.c $(OUTPUT_DIR)/$(CUDA_LIBRARY)
 	$(MPICC) $(MPIINC) $(MPIFLAGS) -c $< -o $@
 	mv $@ $(OUTPUT_DIR)/$@
 
 life.x: $(OUTPUT_DIR)/life.o $(OUTPUT_DIR)/$(CUDA_LIBRARY)
-	$(MPICC) $(MPIINC) $(MPIFLAGS)  -o $@ $+
+	$(MPICC) $(MPIINC) $(MPIFLAGS) -o $@ $+
 	mv $@ $(OUTPUT_DIR)/$@
 	
 clean:
